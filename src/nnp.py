@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.manifold import TSNE
+from sklearn.metrics.pairwise import euclidean_distances, cosine_distances, cosine_similarity
 
 from src.functs import min_max_norm
 
@@ -17,10 +18,10 @@ class NNP(nn.Module):
         
         self.isize = 256
 
-        self.norm_layer = nn.BatchNorm1d(input_dim, affine=False)
-        self.norm_layer.eval()
+        self.register_buffer('mean', torch.zeros(self.input_dim))
+        self.register_buffer('std', torch.ones(self.input_dim))
 
-        self.net = nn.Sequential(
+        self.mlp = nn.Sequential(
             nn.Dropout(),
             nn.Linear(self.input_dim, self.isize),
             nn.ReLU(),
@@ -36,35 +37,44 @@ class NNP(nn.Module):
         self.set_optim()
     
     def set_optim(self):
-        self.optim = optim.Adam(self.net.parameters(), lr=0.001)
+        self.optim = optim.Adam(self.mlp.parameters(), lr=0.001)
 
-    def forward(self, inputs):
+    def forward(self, x):
         with torch.no_grad():
-            x = self.norm_layer(inputs)
-        return self.net(x)
+            x = (x - self.mean) / (self.std + 1e-8)
+        return self.mlp(x)
 
     def learn_normalization_param(self, input_patches):
-        self.norm_layer.running_mean = torch.tensor(input_patches.mean(0))
-        self.norm_layer.running_var  = torch.tensor(input_patches.std(0)**2)
+        self.smean = input_patches.mean(0)
+        self.sdev = input_patches.std(0)
+        with torch.no_grad():
+            self.mean.copy_(torch.tensor(input_patches.mean(0)))
+            self.std.copy_(torch.tensor(input_patches.std(0)))
 
     def predict(self, patches):
-        print(patches.dtype)
-        X =  torch.tensor(patches).float().detach().clone().requires_grad_(False)
+        X =  torch.tensor(patches).float().requires_grad_(False)
 
-        self.net.eval()
+        self.mlp.eval()
         with torch.no_grad():
-            pred = self.net(X)
+            pred = self.forward(X)
         return pred
 
 
-    def fit(self, input_patches, labels, epochs=300):
+    def fit(self, input_patches, labels, epochs=300, use_metric="euclidean"):
 
         self.learn_normalization_param(input_patches)
 
         acc_loss = []
 
+        if use_metric=="euclidean_distance":
+            pair_metric = euclidean_distances(input_patches)
+        elif use_metric =="cosine_distance":
+            pair_metric = cosine_distances(input_patches)
+        elif use_metric == "cosine_similarity":
+            pair_metric = cosine_similarity(input_patches)
+        
         X_embedded = TSNE(n_components=2, learning_rate='auto',init='random',
-                           perplexity=20).fit_transform(input_patches)
+                            perplexity=20, metric='precomputed').fit_transform(pair_metric)
 
         X_embedded = min_max_norm(X_embedded)
 
@@ -83,7 +93,7 @@ class NNP(nn.Module):
         
                 self.optim.zero_grad()
     
-                outputs = self.net(inputs)
+                outputs = self.forward(inputs)
                 # loss = F.l1_loss(outputs, labels)
                 
                 loss = self.criterion(outputs, labels)
@@ -99,7 +109,7 @@ class NNP(nn.Module):
         print('Finished Training                 ')
 
 
-        pred = self.predict(Xtr)
+        pred = self.predict(input_patches)
         return pred, X_embedded, acc_loss
 
 
