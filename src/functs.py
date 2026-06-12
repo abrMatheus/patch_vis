@@ -69,7 +69,7 @@ def gen_svox_center(svox_img, gt_image):
 
 def min_max_norm(xvec):
     fac = (xvec.max(0) - xvec.min(0))
-    return (xvec - xvec.min(0))/fac
+    return (xvec - xvec.min(0))/(fac + 0.001)
 
 
 def creat_marker_label_image(gt_img, markers, mlabel):
