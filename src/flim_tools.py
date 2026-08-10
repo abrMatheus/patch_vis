@@ -1,12 +1,36 @@
 import torch
 
 import os
-from pyflim import arch, flim
-from flim.experiments import utils
+# from pyflim import arch, flim
+# from flim.experiments import utils
+from skimage.color import rgb2lab, gray2rgb
 import numpy as np
 
 from src.functs import read_image, creat_marker_label_image, read_markers
 
+from skimage.util.shape import view_as_windows
+
+def my_patchify(img, patch_shape):
+    dilation_ratio=1
+    if(len(img.shape) > 2):
+        pad = 1*(patch_shape[0]-1)//2 # not considering dilation
+        padded = np.pad(img, ((pad, pad), (pad, pad), (0,0)), 'constant', constant_values=0)
+        X, Y, F = padded.shape
+        x, y = patch_shape
+        #k = (dilation_ratio-1)*(x-1) + x
+        k=x
+        patches_ = view_as_windows(padded,(k, k, F)).reshape((-1,k,k,F))
+    else:
+        pad = dilation_ratio*(patch_shape[0]-1)//2
+        padded = np.pad(img, ((pad, pad), (pad, pad)), 'constant', constant_values=0)
+        X, Y = padded.shape
+        x, y = patch_shape
+
+        # k = (dilation_ratio-1)*(x-1) + x
+        k=x
+
+        patches_ = view_as_windows(padded,(k, k)).reshape((-1,k,k))
+    return patches_
 
 def resize(y_act, original_size=[400,400]):
     y_act = torch.tensor(y_act).permute(2,0,1).unsqueeze(0)
@@ -33,9 +57,12 @@ def load_patches_from_marked_images(mark_dir, im_dir, gt_dir, kernel_size=[3,3],
         basename = mi.split("-seeds")[0]
 
         # img = read_image(f"{im_dir}/{basename}.png")
-        img = utils.load_image(f"{im_dir}/{basename}.png", lab=use_lab) # todo: nem sei se é equivalente
-        # img = read_image(f"{im_dir}/{basename}.png")
-        # img = _image_to_lab(img)
+        # img = utils.load_image(f"{im_dir}/{basename}.png", lab=use_lab) # todo: nem sei se é equivalente
+        img = read_image(f"{im_dir}/{basename}.png")
+        if use_lab:
+            if img.ndim == 2:
+                img = gray2rgb(img)
+            img = rgb2lab(img)
         gti = read_image(f"{gt_dir}/{basename}.png")
 
 
@@ -47,8 +74,10 @@ def load_patches_from_marked_images(mark_dir, im_dir, gt_dir, kernel_size=[3,3],
 
 
 
-        patch_i = flim.FLIMModel.patchify(img, patch_shape=kernel_size)
-        patch_m = flim.FLIMModel.patchify(marker_image, patch_shape=[1,1]).reshape(-1)
+        # patch_i = flim.FLIMModel.patchify(img, patch_shape=kernel_size)
+        # patch_m = flim.FLIMModel.patchify(marker_image, patch_shape=[1,1]).reshape(-1)
+        patch_i = my_patchify(img, patch_shape=kernel_size)
+        patch_m = my_patchify(marker_image, patch_shape=[1,1]).reshape(-1)
 
 
         mpatch_m = patch_m[patch_m>0]
@@ -60,23 +89,6 @@ def load_patches_from_marked_images(mark_dir, im_dir, gt_dir, kernel_size=[3,3],
         mpatch_m = mpatch_m.reshape(N,-1)
 
 
-        if mimage_dir is not None:
-            mimg = utils.load_mimage(f"{mimage_dir}/{basename}.mimg")
-            mimg = resize(mimg, original_size=gti.shape[0:2])
-            # patch_mi = flim.FLIMModel.patchify(mimg, patch_shape=[1,1])
-
-            patch_mi = flim.FLIMModel.patchify(mimg, patch_shape=kernel_size)
-
-            mpatch_mi = patch_mi[patch_m>0]
-            mpatch_mi = mpatch_mi.reshape(N,-1)
-
-            if i==0:
-                ret_mpatches = mpatch_mi
-            else:
-                ret_mpatches = np.concatenate((ret_mpatches, mpatch_mi), axis=0)
-
-
-
         # ret_patches.append(mpatch_i)
         # ret_labels.append(mpatch_m)
 
@@ -85,12 +97,12 @@ def load_patches_from_marked_images(mark_dir, im_dir, gt_dir, kernel_size=[3,3],
         if i==0:
             ret_patches = mpatch_i
             ret_labels  = mpatch_m
-            ret_imlabel = np.ones_like(mpatch_m)*i
+            # ret_imlabel = np.ones_like(mpatch_m)*i
         else:
-            tmp_i =np.ones_like(mpatch_m)*i
+            # tmp_i =np.ones_like(mpatch_m)*i
             ret_patches = np.concatenate((ret_patches, mpatch_i), axis=0)
             ret_labels  = np.concatenate((ret_labels, mpatch_m), axis=0)
-            ret_imlabel = np.concatenate((ret_imlabel, tmp_i), axis=0)
+            # ret_imlabel = np.concatenate((ret_imlabel, tmp_i), axis=0)
 
     print("Done              ", flush=True)
 

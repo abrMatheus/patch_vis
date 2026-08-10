@@ -18,7 +18,7 @@ def save_marker(markers, mlabel, path, imshape):
 
     f = open(path, "w")
 
-    line = f"{N} {int(imshape[0])} {int(imshape[1])}\n"
+    line = f"{N} {int(imshape[1])} {int(imshape[0])}\n"
     f.writelines([line])
 
     for m,l in zip(markers, mlabel):
@@ -69,7 +69,8 @@ def gen_svox_center(svox_img, gt_image):
 
 def min_max_norm(xvec):
     fac = (xvec.max(0) - xvec.min(0))
-    return (xvec - xvec.min(0))/(fac + 0.001)
+    ret = xvec.copy()
+    return (ret - xvec.min(0))/(fac + 0.001)
 
 
 def creat_marker_label_image(gt_img, markers, mlabel):
@@ -81,4 +82,73 @@ def creat_marker_label_image(gt_img, markers, mlabel):
             ret_img[m[0],m[1]]=1
     return ret_img
 
+
+
+def new_marker_is_distance_from_set(new_marker, markers, marker_size, ratio=1.0):
+
+    newm = np.array(new_marker)
+    
+    for m in markers:
+        if np.linalg.norm(np.array(m) - newm , ord=2) < marker_size * ratio:
+            return False
+
+    return True
+
+
+def cresce_disco(new_marker, marker_size):
+
+    disc = []
+    for yi in range(new_marker[0]-marker_size, new_marker[0]+marker_size +1):
+        for xi in range(new_marker[1]-marker_size, new_marker[1]+marker_size +1):
+            if not new_marker_is_distance_from_set(new_marker, [[yi,xi]], marker_size, ratio=1.0):
+                disc.append([yi,xi])
+
+    return disc
+            
+
+def gen_random_disk_markers(image, gt, num_markers, marker_size):
+    ysize=image.shape[0]
+    xsize=image.shape[1]
+
+    Nimg = ysize*xsize
+    
+    markers_centers = []
+    markers_indexes = []
+
+
+    # gera os centros dos marcadores
+    while len(markers_centers) < num_markers:
+        index = np.random.randint(0, high=Nimg-1)
+        yi = index%(ysize-1)
+        xi = int(index/(ysize-1))
+
+        if index in markers_indexes:
+            continue
+
+        # verifica se há uma distancia com outros marcadores
+        if not new_marker_is_distance_from_set([yi,xi], markers_centers, marker_size, ratio=3.5):
+            continue
+
+        # verifica se há uma distancia com as bordas
+        # if not new_marker_is_distance_from_set([yi,xi], [[0,0],[ysize-1,0], [0,xsize-1], [ysize-1, xsize-1]], marker_size, ratio=10.0):
+        if yi >= ysize-3 or yi < 3 or xi >= xsize-3 or xi < 3:
+            continue
+
+        markers_indexes.append(index)
+        markers_centers.append([yi,xi])
+
+
+    # cresce os marcadores
+    markers = []
+    for m in markers_centers:
+        adj_points = cresce_disco(m, marker_size)
+
+        markers = markers + adj_points
+    
+    mlabel = []
+    
+    for m in markers:
+        mlabel.append(gt)
+    
+    return markers, mlabel
 

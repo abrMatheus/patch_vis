@@ -41,13 +41,13 @@ class NNP(nn.Module):
         return self.mlp(x)
 
 
-    def predict(self, patches):
+    def predict_no_grad(self, patches):
         self.mlp.cuda()
         Xtr = torch.tensor(patches).float().cuda()
         self.mlp.eval()
         with torch.no_grad():
             pred = self.forward(Xtr)
-        return pred.detach().cpu().numpy()
+        return pred
 
 
     def fit(self, input_patches, X_embedded, epochs=300, batch_size=128):
