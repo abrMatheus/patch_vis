@@ -223,7 +223,7 @@ class PointExplorer:
 
         self.use_appa=use_appa
         self.mark_norm=mark_norm
-        self.use_patch=use_patch # TODO:
+        self.use_patch=use_patch
 
 
         ################ trained files
@@ -249,7 +249,6 @@ class PointExplorer:
         self.torch_img_model = None
         self.torch_dbm_model = None
         self.torch_img_dec = None
-        self.torch_dbm_dec = None
         self.dbm_nd = None
         self.dbm_2d = None
 
@@ -299,28 +298,31 @@ class PointExplorer:
 
         self.allimgs, self.all_limgs, self.gt_imgs = read_all_images(self.imlist, self.imfolder, self.gt_folder)
 
-        patches, self.labels, nn_dict, nn_inv_dict, appa_dict, appa_inv_dict = load_exp_nninv(exp_folder_nnp)
+        self.patches, self.labels, nn_dict, nn_inv_dict, appa_dict, appa_inv_dict = load_exp_nninv(exp_folder_nnp)
 
-        self.mdata = patches.mean(0)
-        self.sdata = patches.std(0)
+        self.mdata = self.patches.mean(0, keepdims=True)
+        self.sdata = self.patches.std(0, keepdims=True)
+
+        print("eman", self.mdata)
+        print("patches[0]", self.patches[0])
 
         if self.use_appa:
-            self.p_model  = appa.APPA(patches.shape[1],2)
-            self.inv_model = NNPInv(2, patches.shape[1])
+            self.p_model  = appa.APPA(self.patches.shape[1],2)
+            self.inv_model = NNPInv(2, self.patches.shape[1])
 
             self.p_model._model.load_state_dict(appa_dict)
             self.inv_model.load_state_dict(appa_inv_dict)
         
         else:
-            # self.p_model = NNP(patches.shape[1],2)
-            self.inv_model = NNPInv(2, patches.shape[1])
+            # self.p_model = NNP(self.patches.shape[1],2)
+            self.inv_model = NNPInv(2, self.patches.shape[1])
 
             self.p_model.load_state_dict(nn_dict)
             self.inv_model.load_state_dict(nn_inv_dict)
 
         # plot proj
 
-        self.z_patches = normalize_patch(patches, patches)
+        self.z_patches = normalize_patch(self.patches, self.patches)
 
         self.x_emb_predic   = self.p_model.predict_no_grad(self.z_patches).detach().numpy()
 
@@ -343,6 +345,8 @@ class PointExplorer:
                 click_2d = np.array([x,y]).reshape(1,2)
                 click_nd = self.inv_model.predict(click_2d)
                 z_click_nd = inverse_min_max(click_nd ,self.z_patches)
+                if self.use_patch:
+                    z_click_nd = inverse_norm(z_click_nd, self.patches)
                 self.dbm_nd[0,i,j,:] = torch.tensor(z_click_nd[0,:]) #todo: otimizar isso, conversao torch-np-torch
 
         self.dbm_nd = self.dbm_nd.permute(0,3,1,2).float().cuda()
@@ -376,17 +380,55 @@ class PointExplorer:
         self.inv_model.eval()
         click_nd = self.inv_model.predict(click_2d)
         z_click_nd = inverse_min_max(click_nd ,self.z_patches)
-        acts = np.matmul(self.z_patches, z_click_nd.T).reshape(-1)
+        acts = np.matmul(self.z_patches, z_click_nd.transpose()).reshape(-1)
         print("Acts min max ", acts.min(), acts.max())
         acts[acts<0]=0
 
         
-        self.ax_act.scatter(self.x_emb_predic[:,0],self.x_emb_predic[:,1], c=acts, cmap='magma', alpha=1.0, s=3)
 
         n_filter=1
-        centers = z_click_nd
-        best_a, best_I, b_name, best_coord, best_vector = get_best_act(self.allimgs, self.all_limgs,self.imfolder, self.imlist, centers, self.mdata, self.sdata, self.k_size, n_filter)
-    
+        center = z_click_nd
+        best_a, best_I, b_name, best_coord, best_vector = get_best_act(self.allimgs, self.all_limgs,self.imfolder, self.imlist, center, self.mdata, self.sdata, self.k_size, n_filter)
+
+        best_vector = inverse_norm(best_vector, self.patches)
+
+        if self.use_patch:
+            center = best_vector.reshape(1,-1).copy()
+
+        if self.selected_centers is None:
+            tmp_centers = center
+            tmean = np.zeros((1,tmp_centers.shape[1]))
+            tstd  = np.ones((1,tmp_centers.shape[1]))
+        else:
+            tmp_centers = np.concatenate((self.selected_centers, center), axis=0)    
+            tstd  = tmp_centers.std(0)
+            tmean = tmp_centers.mean(0)
+
+
+        if self.use_patch:
+            if self.mark_norm:
+                print("mean", tmean)
+                print("std", tstd)
+                tmp_center = (center-tmean)/(tstd*tstd+0.001)
+                bias = np.matmul(tmean, tmp_center.transpose())[0]
+                print("bias", bias)
+                acts = np.matmul(self.patches, tmp_center.transpose()).reshape(-1) - bias
+            else:
+                tmp_center = (center-self.mdata)/(self.sdata*self.sdata+0.001)
+                bias = np.matmul(self.mdata, tmp_center.transpose())[0]
+                acts = np.matmul(self.patches, tmp_center.transpose()).reshape(-1) - bias
+            # acts = acts-bias
+            acts[acts<0]=0
+        if self.mark_norm:
+            print("hereeeeeeeeeeeeeeeeeeeeeeeeeeee - not patch yes marknorm")
+            tmp_center = (z_click_nd-tmean)/(tstd*tstd+0.001)
+            bias       = np.matmul(tmean, tmp_center.T)[0]
+            acts       = np.matmul(self.z_patches, tmp_center.T)
+            acts = acts-bias
+            acts[acts<0]=0
+
+
+        self.ax_act.scatter(self.x_emb_predic[:,0],self.x_emb_predic[:,1], c=acts, cmap='magma', alpha=1.0, s=3)
         # caso queira mostrar act do patch
         # acts = np.matmul(self.z_patches, best_vector.T).reshape(-1)
         # acts[acts<0]=0
@@ -447,9 +489,9 @@ class PointExplorer:
         )
 
         if self.selected_centers is None:
-            self.selected_centers = centers
+            self.selected_centers = center
         else:
-            self.selected_centers = np.concatenate((self.selected_centers, centers), axis=0)
+            self.selected_centers = np.concatenate((self.selected_centers, center), axis=0)
         self.markers.append([b_name, coords, int(label)])
 
         # Permanently annotate plot
@@ -476,18 +518,21 @@ class PointExplorer:
         tmp[tmp<0]=0 #RELU
         tmp = self.torch_img_dec(tmp)
         print("out models", tmp.shape)
+        tmp[tmp<0]=0 #RELU
 
         dec = tmp.detach().cpu().numpy()[0,0]
 
-        print("DECS min max ", dec.min(), acts.max())
+        print("DECS min max ", dec.min(), dec.max())
 
         # dec=dec/(np.abs(dec.max())+0.01) # decoder retorna valores entre 0,255 e nao binarios
         # dec = (dec - dec.min())/(dec.max() - dec.min() + 0.001)
         thold = threshold_otsu(dec)
         print("thold", thold)
         mask = dec>thold
-        dec[mask==False] = 0
-        dec[mask==True] = 1
+        dec[mask==False] = 0.0
+        dec[mask==True] = 1.0
+
+        # print("DECS min max ", dec.min(), dec.max())
 
         self.ax_dbm.clear()
 
@@ -513,51 +558,73 @@ class PointExplorer:
         o_size = self.selected_centers.shape[0]
 
 
-        if self.mark_norm:
-            print("MARKNORMMMMMMMMMMMMMMMMMM")
-            use_mean = self.selected_centers.mean(0)
-            use_std  = self.selected_centers.std(0)
+        if not self.use_patch:
+            if self.mark_norm:
+                use_mean = self.selected_centers.mean(0, keepdims=True)
+                use_std  = self.selected_centers.std(0, keepdims=True)
+                if self.selected_centers.shape[0] == 1:
+                    use_mean = np.zeros_like(use_mean)
+                    use_std  = np.ones_like(use_mean)
+                
+                kernels_dbm = (self.selected_centers - use_mean)/(use_std*use_std+1e-8)
+                bias_dbm    = np.matmul(use_mean, kernels_dbm.T)[0]
+            else:
+                kernels_dbm = self.selected_centers.copy()
+                bias_dbm    = np.ones((self.selected_centers.shape[0]))*0.0
 
-            use_kernels = (self.selected_centers - use_mean)/(use_std+0.001)
-
+            kernels_img = kernels_dbm/(self.sdata+1e-8)
+            bias_img    = bias_dbm + np.matmul(self.mdata, kernels_img.T)[0]
         else:
-            use_mean = self.mdata
-            use_std  = self.sdata
+            if self.mark_norm:
+                use_mean = self.selected_centers.mean(0, keepdims=True) #nesse caso sao patches similares, TODO: criar at
+                use_std  = self.selected_centers.std(0, keepdims=True)
+                if self.selected_centers.shape[0] == 1:
+                    use_mean = np.zeros_like(use_mean)
+                    use_std  = np.ones_like(use_mean)
+            else:
+                use_mean = self.mdata
+                use_std  = self.sdata
 
-            use_kernels = self.selected_centers.copy()
+            print("dbm-img")
+            print("use_mean", use_mean)
+            print("use_std", use_std)
+            kernels_dbm = (self.selected_centers - use_mean)/(use_std*use_std+1e-8)
+            bias_dbm    = np.matmul(use_mean, kernels_dbm.T)[0]
 
+            kernels_img = kernels_dbm.copy()
+            bias_img    = bias_dbm.copy()
 
 
         if self.torch_img_model is not None:
             del self.torch_img_model
             del self.torch_dbm_model
             del self.torch_img_dec
-            del self.torch_dbm_dec
             
         self.torch_img_model = torch.nn.Conv2d(in_channels=c_size, out_channels=o_size, kernel_size=self.k_size, stride=1, bias=True, padding=0)
         self.torch_img_dec = torch.nn.Conv2d(in_channels=o_size, out_channels=1, kernel_size=1, stride=1, bias=False, padding=0)
         self.torch_dbm_model = torch.nn.Conv2d(in_channels=self.selected_centers.shape[1], out_channels=o_size, kernel_size=1, stride=1, bias=True, padding=0)
-        self.torch_dbm_dec = torch.nn.Conv2d(in_channels=o_size, out_channels=1, kernel_size=1, 
-        stride=1, bias=False, padding=0)
 
+
+
+        print("kernels_dbm shape", kernels_dbm.shape, kernels_img.shape, bias_dbm.shape, bias_img.shape)
 
         # TODO: ver questao de 
 
-        kernels_dbm = use_kernels.reshape(o_size,1,1,f_size).copy()
+        kernels_dbm = kernels_dbm.reshape(o_size,1,1,f_size).copy()
         kernels_dbm = torch.tensor(kernels_dbm).permute(0,3,1,2)
 
-        use_kernels = use_kernels/(use_std+0.001)
-        use_bias    = np.matmul(use_mean.reshape(1,-1), use_kernels.transpose())[0]
-
-        kernels_img = use_kernels.reshape(o_size,self.k_size,self.k_size,c_size)
+        kernels_img = kernels_img.reshape(o_size,self.k_size,self.k_size,c_size)
         kernels_img = torch.tensor(kernels_img).permute(0,3,1,2)
 
 
         self.torch_img_model.weight = torch.nn.Parameter(kernels_img)
-        self.torch_img_model.bias = torch.nn.Parameter(-torch.tensor(use_bias))
+        self.torch_img_model.bias = torch.nn.Parameter(-torch.tensor(bias_img))
 
         self.torch_dbm_model.weight = torch.nn.Parameter(kernels_dbm.float())
-        self.torch_dbm_model.bias = torch.nn.Parameter(-torch.tensor(use_bias).float())
+        self.torch_dbm_model.bias = torch.nn.Parameter(-torch.tensor(bias_dbm).float())
+
+        print("biaaas", self.torch_dbm_model.bias)
+        print("kernels", self.torch_img_model.weight, self.torch_dbm_model.weight.shape, self.torch_img_model.weight.shape)
 
         labels = []
         for i in range(o_size):
@@ -571,9 +638,9 @@ class PointExplorer:
 
         dec_weights = torch.nn.Parameter(torch.tensor(labels).reshape(1,o_size,1,1).float())
         self.torch_img_dec.weight = torch.nn.Parameter(dec_weights)
-        print("dec weights", dec_weights)
-        # self.torch_dbm_dec.weight = torch.nn.Parameter(dec_weights)
-        
+
+
+        print(dec_weights)
 
 
     def finish(self, event):
@@ -613,10 +680,18 @@ class PointExplorer:
                 # print(torch.amax(res, dim=(2,3)), res.shape)
 
                 sal = self.torch_img_dec(res.float())[0,0]
+                sal[sal<0]=0 #relu
+                smin = sal.min()
+                smax = sal.max()
+                # s1   = sal[120,120]
+                # s2   = sal[150,70]
+                s1=0
+                s2=0
                 sal = sal.detach().cpu().numpy()
                 thold = threshold_otsu(sal)
-                sal[sal<=thold] = 0
-                sal[sal>thold] = 1
+                mask = sal>thold
+                sal[mask==False] = 0.0
+                sal[mask] = 1.0
 
                 #decode
                 # sal = self.decode_by_ldecoder(res, img.shape[0:2],torch.tensor(kernel_labels).cuda())
@@ -639,14 +714,19 @@ class PointExplorer:
 
         for i in range(o_size):
             axs2[i+1].imshow(res[0,i].detach().cpu().numpy(), cmap="inferno")
-            axs2[i+1].set_title(f"act{i}")
+            m = res[0,i].detach().cpu().numpy().max()
+            a1 = res[0,i].detach().cpu().numpy()[0,0]#[120,120]
+            a2 = res[0,i].detach().cpu().numpy()[0,0]#[150,70]
+            print(res.shape)
+            axs2[i+1].set_title(f"act{i} {m:.2f} {a1:.2f} {a2:.2f}")
         
         axs2[-2].imshow(sal, cmap="gray")
         axs2[-1].imshow(gt_img, cmap="gray")
         axs2[0].imshow(img_raw)
 
         axs2[0].set_title("Img")
-        axs2[-2].set_title("Pred.")
+        # axs2[-2].set_title("Pred.")
+        axs2[-2].set_title(f"pred {smin:.2f} {smax:.2f} {s1:.2f} {s2:.2f}")
         axs2[-1].set_title("GT")
 
         plt.show()
@@ -679,5 +759,5 @@ class PointExplorer:
 
 if __name__ == "__main__":
 
-    explorer = PointExplorer(dataset="fish", k_size=3, n_svox=25, split=1)
+    explorer = PointExplorer(dataset="fish", k_size=3, n_svox=25, split=1, use_patch=False, mark_norm=False)
     plt.show(block=True)
