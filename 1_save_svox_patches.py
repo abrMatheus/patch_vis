@@ -43,14 +43,15 @@ def gen_patches(dataset, split, n_svox, k_size):
 
 
 
+stride = [1,2,1]
 if __name__ == "__main__":
 
     split = 1
 
 
-    for n_svox in [25]:
+    for n_svox in [25]:#50
         for kernel_size in [3,5,9,11]:
 
-            for dataset in [ 'refuge_std','refuge_new_match_rgb']:
+            for dataset in ['plants','schisto','refuge', 'fish', 'gbm2d', 'mass_building']:
                 print(f"Getting patches from {dataset} {split} {n_svox} {kernel_size}")
                 gen_patches(dataset, split, n_svox, kernel_size)
