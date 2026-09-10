@@ -44,9 +44,7 @@ if __name__ == "__main__":
 
     split = 1
 
-    # for n_svox in [25,30,50]:
-    #     for kernel_size in [3,5,9,11]:
-    for n_svox in [25]:
-        for kernel_size in [3]:
-            for dataset in ['refuge_match']:
+    for n_svox in [25,50]:
+        for kernel_size in [3,5,9,11]:
+            for dataset in [ 'plants','schisto','refuge', 'fish', 'gbm2d', 'mass_building']:
                 save_markers_dataset(dataset, split, n_svox)
