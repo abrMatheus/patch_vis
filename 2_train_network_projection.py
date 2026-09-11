@@ -41,76 +41,85 @@ def normalize_patch(in_patches):
 
 split = 1
 
+kde_bandwidth=0.01
+
 metric="euclidean_distance"
 
 # datasets = ['plants','schisto','fish', 'gbm2d', 'mass_building']
 
-datasets = ['refuge', 'refuge_rgb', 'refuge_new_match', 'refuge_new_match_rgb', 'refuge_std']
+datasets = [ 'plants','schisto','refuge', 'fish', 'gbm2d', 'mass_building']
 
-for n_svox in [25]:
-    alpha = 0.5/n_svox
-    for k_size in [3]:
-        fig, axs = plt.subplots(len(datasets), 3, figsize=(15,10))
+# datasets = ["brats2d"]
 
-        for i, dataset in enumerate(datasets):
+# datasets = ['refuge', 'refuge_rgb', 'refuge_new_match', 'refuge_new_match_rgb', 'refuge_std']
+
+for split in [1,2,3]:#,2,3]:
+    for n_svox in [25]:#,50]:
+        alpha=1.0
+        spoint = 1
+        for k_size in [3,5,9]:#,5,9,11]:
+            fig, axs = plt.subplots(len(datasets)+1, 3, figsize=(15,10), constrained_layout=True)
+
+            for i, dataset in enumerate(datasets):
+                
+                patch_dir = f"s_patches/{dataset}/s_{split}/n_{n_svox}/k_{k_size}"
+
+
+                patches = np.load(f"{patch_dir}/not_norm_patches_l1.npy")
+                labels  = np.load(f"{patch_dir}/labels.npy")
+
+                n_patches = normalize_patch(patches)
+                # n_patches = patches.copy()
+
+                print("patches.shape", n_patches.shape)
+
+                x_embedded = TSNE(n_components=2, learning_rate='auto',init='random',
+                                perplexity=20, random_state=42).fit_transform(n_patches)
+
+                # x_embedded = umap.UMAP(random_state=42).fit_transform(n_patches)
+                # x_embedded = MDS(n_components=2, random_state=42, max_iter=1, init="classical_mds").fit_transform(n_patches)
+                
+                # continue
+                x_embedded = min_max_norm(x_embedded)
+
+                model = NNP(n_patches.shape[1], 2, lr=0.001)
+
+                model_appa = appa.APPA(n_patches.shape[1], 2, kde_bandwidth=kde_bandwidth)
+
+                print("patches.shape", patches.shape, labels.shape)
+                pred, x_emb, acc_loss = model.fit(n_patches, x_embedded, batch_size=128)
+                model_appa.fit(n_patches, x_embedded)
+
+                pred_nnp  = model.predict_no_grad(n_patches).detach().cpu().numpy()
+
+                pred_appa = model_appa.predict_no_grad(n_patches).detach().cpu().numpy()
+
+
+                axs[i][0].scatter(x_embedded[:,0],x_embedded[:,1], c=labels, cmap='tab10', vmin=1, vmax=10, alpha=alpha, s=spoint)
+                axs[i][1].scatter(pred_nnp[:,0],pred_nnp[:,1], c=labels, cmap='tab10', vmin=1, vmax=10, alpha=alpha, s=spoint)
+                axs[i][2].scatter(pred_appa[:,0],pred_appa[:,1], c=labels, cmap='tab10', vmin=1, vmax=10, alpha=alpha, s=spoint)
+
+                axs[i][0].set_title("t-SNE projection")
+                axs[i][1].set_title("NNP")
+                axs[i][2].set_title("APPA")
+
+                axs[i][0].set_ylabel(f"{dataset}")
+
+                exp_folder = f"exps/{dataset}/s_{split}/n_{n_svox}/k_{k_size}"
+
+                # model_appa.trainer.save_checkpoint("path/to/save/model.ckpt")
+
+                save_exp(exp_folder, model, model_appa._model, pred_nnp, pred_appa, x_embedded, labels, patches)
+
+
+
+
+            if not os.path.exists("results/"):
+                os.makedirs("results/")
             
-            patch_dir = f"s_patches/{dataset}/s_{split}/n_{n_svox}/k_{k_size}"
+            fig.suptitle(f"appa results for multiple datasets using svox={n_svox} k={k_size} and split {split} {metric} - kde_bandwidth {kde_bandwidth}")
+            fig.savefig(f"results/nnp_appa_sv={n_svox}_k={k_size}_split={split}.png")
 
-
-            patches = np.load(f"{patch_dir}/not_norm_patches.npy")
-            labels  = np.load(f"{patch_dir}/labels.npy")
-
-            n_patches = normalize_patch(patches)
-            # n_patches = patches.copy()
-
-            print("patches.shape", n_patches.shape)
-
-            x_embedded = TSNE(n_components=2, learning_rate='auto',init='random',
-                            perplexity=20, random_state=42).fit_transform(n_patches)
-
-            # x_embedded = umap.UMAP(random_state=42).fit_transform(n_patches)
-            # x_embedded = MDS(n_components=2, random_state=42, max_iter=1, init="classical_mds").fit_transform(n_patches)
-            
-            # continue
-            x_embedded = min_max_norm(x_embedded)
-
-            model = NNP(n_patches.shape[1], 2, lr=0.001)
-
-            model_appa = appa.APPA(n_patches.shape[1], 2, kde_bandwidth=0.01)
-
-            print("patches.shape", patches.shape, labels.shape)
-            pred, x_emb, acc_loss = model.fit(n_patches, x_embedded, batch_size=128)
-            model_appa.fit(n_patches, x_embedded)
-
-            pred_nnp  = model.predict(n_patches)
-
-            pred_appa = model_appa.predict_no_grad(n_patches)
-
-
-            axs[i][0].scatter(x_embedded[:,0],x_embedded[:,1], c=labels, cmap='tab10', vmin=1, vmax=10, alpha=alpha)
-            axs[i][1].scatter(pred_nnp[:,0],pred_nnp[:,1], c=labels, cmap='tab10', vmin=1, vmax=10, alpha=alpha)
-            axs[i][2].scatter(pred_appa[:,0],pred_appa[:,1], c=labels, cmap='tab10', vmin=1, vmax=10, alpha=alpha)
-
-            axs[i][0].set_title("MDS projection")
-            axs[i][1].set_title("NNP")
-            axs[i][2].set_title("APPA")
-
-            axs[i][0].set_ylabel(f"{dataset}")
-
-            exp_folder = f"exps/{dataset}/s_{split}/n_{n_svox}/k_{k_size}"
-
-            # model_appa.trainer.save_checkpoint("path/to/save/model.ckpt")
-
-            save_exp(exp_folder, model, model_appa._model, pred_nnp, pred_appa, x_embedded, labels, patches)
-
-
-
-
-        if not os.path.exists("results/"):
-            os.makedirs("results/")
-
-        fig.suptitle(f"appa results for multiple datasets using svox={n_svox} k={k_size} and split {split} {metric}")
-        fig.savefig(f"results/refuge_nnp_appa_sv={n_svox}_k={k_size}_split={split}.png")
-
+            # break
         # break
     # break

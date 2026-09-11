@@ -40,15 +40,13 @@ def resize(y_act, original_size=[400,400]):
     return y_act.permute(0,2,3,1).detach().numpy()[0]
 
 
-def load_patches_from_marked_images(mark_dir, im_dir, gt_dir, kernel_size=[3,3], mimage_dir=None, use_lab=True):
+def load_patches_from_marked_images(mark_dir, im_dir, gt_dir, kernel_size=[3,3], use_lab=True):
 
     imlist = os.listdir(mark_dir)
 
     ret_patches  = None
     ret_labels   = None
     ret_imlabel  = None
-
-    ret_mpatches = None
     ret_names = [ ]
 
     Nim = len(imlist)
@@ -105,8 +103,5 @@ def load_patches_from_marked_images(mark_dir, im_dir, gt_dir, kernel_size=[3,3],
             # ret_imlabel = np.concatenate((ret_imlabel, tmp_i), axis=0)
 
     print("Done              ", flush=True)
-
-    if mimage_dir is not None:
-        return ret_patches, ret_labels, ret_imlabel, ret_mpatches, ret_names
 
     return ret_patches, ret_labels, ret_imlabel

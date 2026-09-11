@@ -73,13 +73,17 @@ def min_max_norm(xvec):
     return (ret - xvec.min(0))/(fac + 0.001)
 
 
-def creat_marker_label_image(gt_img, markers, mlabel):
+def creat_marker_label_image(gt_img, markers, mlabel, bin_label=True):
     ret_img = np.zeros_like(gt_img)
-    for m,l in zip(markers, mlabel):
-        if l==1:
-            ret_img[m[0],m[1]]=2
-        else:
-            ret_img[m[0],m[1]]=1
+    if bin_label:
+        for m,l in zip(markers, mlabel):
+            if l==1:
+                ret_img[m[0],m[1]]=2
+            else:
+                ret_img[m[0],m[1]]=1
+    else: # for mnist and others
+        for m,l in zip(markers, mlabel):
+                ret_img[m[0],m[1]]=l+1
     return ret_img
 
 
